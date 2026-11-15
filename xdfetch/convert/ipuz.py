@@ -13,9 +13,13 @@ is taken off first.
 
 Circles (style shapebg circle) are lowercase letters with Special: circle; a bar
 (style barred) is listed as tricky; a square with more than one letter is a rebus square.
-Clue text with <i>/<b> becomes xd markup. The title, author and notes are the file's; the
-editor comes from an intro that says "Edited by ..."; the copyright is the file's line
-unless it is a bare "©".
+A style can be given inline or by name from the file's "styles". An omitted square (null in
+both puzzle and solution, as for letters printed beside the grid) is `_`. Clues can be
+{"number", "clue"} objects, [number, clue] pairs or "number clue" strings, under "Across"
+and "Down" or "Across:<label>"-style keys. Clue text with <i>/<b> becomes xd markup. The
+title, author and notes are the file's; the editor is the file's "editor", else an intro
+that says "Edited by ..."; any other intro goes in the notes ahead of the file's notes; the
+copyright is the file's line unless it is a bare "©".
 
 An outlet whose files need more than this (a title kept in a record beside the file, say)
 can supply it from a converter plugin that calls convert() here and adjusts the result:
@@ -28,7 +32,7 @@ import html
 import json
 import re
 
-from ..xd import BLOCK, REBUS_KEYS, Clue, Puzzle, clue_text, number_grid, plain
+from ..xd import BLOCK, REBUS_KEYS, VOID, Clue, Puzzle, clue_text, number_grid, plain
 from . import Context, ConvertError
 
 
@@ -49,11 +53,39 @@ def sniff(data: bytes) -> bool:
 def cell_number(cell) -> int | None:
     if isinstance(cell, dict):
         cell = cell.get("cell")
-    return cell if isinstance(cell, int) else None
+    if isinstance(cell, str) and cell.isdigit():  # some files write labels as strings
+        cell = int(cell)
+    return cell if isinstance(cell, int) and not isinstance(cell, bool) and cell > 0 else None
 
 
-def cell_style(cell) -> dict:
-    return (cell.get("style") or {}) if isinstance(cell, dict) else {}
+def cell_style(cell, styles: dict) -> dict:
+    style = (cell.get("style") or {}) if isinstance(cell, dict) else {}
+    if isinstance(style, str):  # a named style from the file's "styles"
+        style = styles.get(style) or {}
+    return style if isinstance(style, dict) else {}
+
+
+def clue_groups(clues: dict) -> dict[str, list]:
+    """The Across and Down lists, under "Across" or "Across:<label>"-style keys."""
+    out: dict[str, list] = {"A": [], "D": []}
+    for key, items in clues.items():
+        direction = {"across": "A", "down": "D"}.get(key.split(":")[0].strip().lower())
+        if direction and isinstance(items, list):
+            out[direction] += items
+    return out
+
+
+def clue_parts(item) -> tuple[object, object] | None:
+    """(number, clue) from a clue object, a [number, clue] pair or a "number clue" string."""
+    if isinstance(item, dict):
+        return item.get("number"), item.get("clue", "")
+    if isinstance(item, list) and len(item) >= 2:
+        return item[0], item[1]
+    if isinstance(item, str):
+        m = re.match(r"\s*(\d+)\.?\s+(.+)", item)
+        if m:
+            return m.group(1), m.group(2)
+    return None
 
 
 def cell_value(cell) -> str | None:
@@ -70,6 +102,8 @@ def convert(data: bytes, ctx: Context) -> Puzzle:
     except (UnicodeDecodeError, ValueError, KeyError, TypeError) as e:
         raise ConvertError(f"not an ipuz crossword: {e}") from e
     block = d.get("block", "#")
+    styles = d.get("styles") or {}
+    groups = clue_groups(d.get("clues") or {})
     if len(puzzle) != h or len(solution) != h or any(len(r) != w for r in puzzle) or any(len(r) != w for r in solution):
         raise ConvertError(f"grid is not {w}x{h}")
     p = Puzzle()
@@ -77,7 +111,7 @@ def convert(data: bytes, ctx: Context) -> Puzzle:
     circled: set[tuple[int, int]] = set()
     for r in range(h):
         for c in range(w):
-            style = cell_style(puzzle[r][c])
+            style = cell_style(puzzle[r][c], styles)
             for k, v in style.items():
                 if (k, v) == ("shapebg", "circle"):
                     circled.add((r, c))
@@ -99,6 +133,8 @@ def convert(data: bytes, ctx: Context) -> Puzzle:
             is_block = v == block or (cell_number(puzzle[r][c]) is None and puzzle[r][c] == block)
             if is_block or (v is None and puzzle[r][c] == block):
                 row += BLOCK
+            elif v is None and puzzle[r][c] is None:
+                row += VOID
             elif not v:
                 row += " "
                 p.needs_review(f"empty square at row {r} col {c}")
@@ -130,16 +166,14 @@ def convert(data: bytes, ctx: Context) -> Puzzle:
             + ("..." if len(off) > 6 else "")
         )
 
-    for direction, key in (("A", "Across"), ("D", "Down")):
-        for item in d.get("clues", {}).get(key, []):
-            if isinstance(item, dict):
-                number, raw = item.get("number"), item.get("clue", "")
-            elif isinstance(item, list) and len(item) >= 2:
-                number, raw = item[0], item[1]
-            else:
+    for direction in ("A", "D"):
+        for item in groups[direction]:
+            parts = clue_parts(item)
+            if parts is None:
                 continue
+            number, raw = parts
             try:
-                number = int(number)
+                number = int(str(number))
             except (TypeError, ValueError):
                 p.needs_review(f"{direction} clue with no number: {str(raw)[:40]}")
                 continue
@@ -153,7 +187,7 @@ def convert(data: bytes, ctx: Context) -> Puzzle:
             p.clues.append(Clue(direction, number, clue_text(html.unescape(str(raw))), answer))
     if not p.clues:
         raise ConvertError("no clues")
-    for item in d.get("clues", {}).get("Across", []) + d.get("clues", {}).get("Down", []):
+    for item in groups["A"] + groups["D"]:
         if isinstance(item, dict) and item.get("answer"):
             p.tricky.append("a clue carries its own answer key; the grid's is used")
             break
@@ -161,10 +195,14 @@ def convert(data: bytes, ctx: Context) -> Puzzle:
     # headers
     title = plain(str(d.get("title") or ""))
     author = plain(str(d.get("author") or ""))
-    editor = ""
+    editor = plain(str(d.get("editor") or ""))
     intro = plain(str(d.get("intro") or ""))
-    if intro and not intro.isdigit() and re.search(r"edited by", intro, re.I):
-        editor = re.sub(r"^.*edited by\s*", "", intro, flags=re.I)
+    intro_note = ""
+    if intro and not intro.isdigit():
+        if re.search(r"edited by", intro, re.I):
+            editor = editor or re.sub(r"^.*edited by\s*", "", intro, flags=re.I)
+        else:
+            intro_note = intro
     p.set("Title", title)
     p.set("Author", re.sub(r"\s+&\s+", " and ", author))
     p.set("Editor", editor)
@@ -173,5 +211,5 @@ def convert(data: bytes, ctx: Context) -> Puzzle:
         p.set("Copyright", copyright_)
     if ctx.date:
         p.set("Date", ctx.date.isoformat())
-    p.notes = plain(str(d.get("notes") or ""))
+    p.notes = "\n\n".join(n for n in (intro_note, plain(str(d.get("notes") or ""))) if n)
     return p

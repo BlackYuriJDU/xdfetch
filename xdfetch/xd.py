@@ -26,6 +26,7 @@ import unicodedata
 from dataclasses import dataclass, field
 
 BLOCK = "#"
+VOID = "_"  # a square that isn't there: outside a shaped grid, or letters printed beside it
 GRID_CHARS = re.compile(r"[^A-Za-z0-9#._]")  # what xdlint (XD002) accepts in a grid row, plus declared rebus keys
 # Keys for rebus squares that aren't circled, in the order they're handed out: xd's puz2xd
 # order (some puzzles need over 30). Circled rebus squares take
@@ -278,7 +279,7 @@ def number_grid(grid: list[str]) -> dict[tuple[str, int], tuple[int, int]]:
     n = 0
 
     def black(r, c):
-        return r < 0 or c < 0 or r >= h or c >= w or grid[r][c] == BLOCK
+        return r < 0 or c < 0 or r >= h or c >= w or grid[r][c] in (BLOCK, VOID)
 
     for r in range(h):
         for c in range(w):
@@ -299,7 +300,7 @@ def answer_at(grid: list[str], direction: str, r: int, c: int) -> str:
     """The grid letters of the slot starting at (r, c)."""
     letters = []
     dr, dc = (0, 1) if direction == "A" else (1, 0)
-    while 0 <= r < len(grid) and 0 <= c < len(grid[0]) and grid[r][c] != BLOCK:
+    while 0 <= r < len(grid) and 0 <= c < len(grid[0]) and grid[r][c] not in (BLOCK, VOID):
         letters.append(grid[r][c])
         r += dr
         c += dc
