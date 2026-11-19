@@ -398,8 +398,14 @@ def test_daily_crossword_split_character_hints_and_tilde():
     assert by["A", 4].answer == "SAGE"
     assert by["D", 1].answer == "HAUL"
     assert by["A", 4].text == "Herb, after a ¬, ~, or !"
-    assert p.tricky == ["8 clues have a ^hint: line, not carried"]
+    assert by["A", 1].meta == [("Hint", "Like a bunny")]
+    assert p.tricky == []
     assert p.review == []
+    xd = p.to_xd()
+    assert "A4. Herb, after a ¬, ~, or ! ~ SAGE\nA4 ^Hint: Wise one\nA5." in xd
+    assert "D4. Resort ~ SPA\nD4 ^Hint: Hot springs\n" in xd
+    assert "^refs" not in xd.lower()
+    assert "hinteditor" not in xd.lower()
     assert p.headers["Author"] == "settername and Bo Second"  # the answer's authors, not `author: as`
     assert p.headers["Editor"] == "Cy Editor"
     assert p.headers["Copyright"] == "© 2026 settername and Bo Second"
@@ -455,6 +461,8 @@ def test_schrodinger_squares():
     _, p = convert.convert(gameplay(fixed), ctx("puzzmo.mini", NOV9))
     assert p.review == []
     assert [c.answer for c in p.clues if (c.direction, c.number) == ("A", 4)] == ["ORE", "OWE"]
+    # the hint (given out of place, after A5) is written once, under the clue's last reading
+    assert "A4. Mine find ~ ORE\nA4. Mine find ~ OWE\nA4 ^Hint: Two answers work\nA5." in p.to_xd()
     # a third reading comes on ^alt1:
     third = fixed.replace("D2 ^alt: AWE", "D2 ^alt: AWE\nD2 ^alt1: AXE")
     _, p = convert.convert(gameplay(third), ctx("puzzmo.mini", NOV9))
@@ -467,6 +475,22 @@ def test_schrodinger_squares():
         "Schrödinger square at row 2, column 2 has R reading",
         "A7: ^alt: OWE for a clue that isn't there",
     ]
+
+
+def test_hint_text_and_strays():
+    text = DAILY_TEXT.replace("Like a bunny", "Like `Harvey` &amp; {@ him | https://example.com/h @}")
+    text = text.replace("D3 ^hint: Zip", "D3 ^hint:   ").replace("D4 ^hint: Hot springs", "D9 ^hint: Nowhere")
+    _, p = convert.convert(gameplay(text), ctx("puzzmo.daily", NOV9))
+    by = {(c.direction, c.number): c for c in p.clues}
+    assert by["A", 1].meta == [("Hint", 'Like "Harvey" & {@him | href: https://example.com/h@}')]
+    assert by["D", 3].meta == []  # a blank hint is no hint
+    assert by["D", 4].meta == []
+    assert p.tricky == ["D9: ^hint: for a clue that isn't there, not carried"]
+    assert p.review == []
+    # a metadata key the converter doesn't know is still noted, not carried
+    _, p = convert.convert(gameplay(DAILY_TEXT.replace("A6 ^hint: Beer", "A6 ^note: Beer")), ctx("x", NOV9))
+    assert p.tricky == ["1 clues have a ^note: line, not carried"]
+    assert "Beer" not in p.to_xd()
 
 
 def test_rebus_answer_keyed_then_expanded():

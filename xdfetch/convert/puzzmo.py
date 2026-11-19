@@ -24,8 +24,10 @@ links and images in clues (`{@ text | url @}`, `{! url | alt | size !}`), writte
 form; and Schrödinger squares, `*` in the grid, that take either of two letters, the
 clue's answer giving one and an `^alt:` line under it the other (`^alt1:` and on for more).
 A Schrödinger square becomes a rebus square whose value lists its letters (`1=E|K`), and the
-clue is written once per reading. Clue metadata lines other than ^refs: and ^alt: (^hint:)
-are not carried and are listed as tricky.
+clue is written once per reading. A clue's ^hint: line (Puzzmo's own daily crossword has one
+under every clue) is written under it as `A1 ^Hint: ...`, its text treated as clue text.
+Clue metadata lines other than ^refs:, ^alt: and ^hint: are not carried and are listed as
+tricky.
 """
 
 from __future__ import annotations
@@ -103,7 +105,8 @@ def convert(data: bytes, ctx: Context) -> Puzzle:
     # the answers that cross it, the clue's own and those on its ^alt: lines
     entries: list[tuple[str, int, str, str]] = []  # direction, number, text, answer
     alts: dict[tuple[str, int], list[str]] = {}
-    extras: dict[str, int] = {}  # other clue metadata lines (A1 ^hint: ...) by key, refs aside
+    hints: dict[tuple[str, int], str] = {}
+    extras: dict[str, int] = {}  # other clue metadata lines by key, refs aside
     for line in sec["Clues"].splitlines():
         line = line.strip()
         meta_line = CLUE_META.match(line)
@@ -113,6 +116,10 @@ def convert(data: bytes, ctx: Context) -> Puzzle:
                 alts.setdefault((meta_line.group(1)[0], int(meta_line.group(1)[1:])), []).append(
                     answer_of(line[meta_line.end() :], split)
                 )
+            elif key == "hint":
+                hint = text_of(line[meta_line.end() :])
+                if hint:
+                    hints[(meta_line.group(1)[0], int(meta_line.group(1)[1:]))] = hint
             elif key != "refs":
                 extras[key] = extras.get(key, 0) + 1
             continue
@@ -122,8 +129,7 @@ def convert(data: bytes, ctx: Context) -> Puzzle:
         if not m:
             p.needs_review(f"clue line not understood: {line[:60]}")
             continue
-        text_ = plain(xd_markup(html.unescape(m.group(3)))).replace("`", '"')  # Puzzmo's backticks around titles
-        entries.append((m.group(1), int(m.group(2)), text_, answer_of(m.group(4), split)))
+        entries.append((m.group(1), int(m.group(2)), text_of(m.group(3)), answer_of(m.group(4), split)))
     schrodinger = schrodinger_letters(rows, entries, alts)
 
     keys: dict[tuple[str, bool], str] = {}
@@ -172,7 +178,7 @@ def convert(data: bytes, ctx: Context) -> Puzzle:
         pos = numbering.get((direction, number))
         if pos is None:
             p.needs_review(f"{direction}{number}: clue has no slot in the grid")
-            p.clues.append(Clue(direction, number, text_, answer.upper()))
+            p.clues.append(Clue(direction, number, text_, answer.upper(), hint_meta(hints, direction, number)))
             continue
         cells = [values.get(ch, ch.upper()).upper().split("|") for ch in answer_at(grid, direction, *pos)]
         expanded = "".join(c[0] for c in cells)
@@ -182,14 +188,18 @@ def convert(data: bytes, ctx: Context) -> Puzzle:
                 readings.append(alt.upper())
             else:
                 p.needs_review(f"{direction}{number}: ^alt: {alt} doesn't fit the slot")
+        hint = hint_meta(hints, direction, number)
         for reading in readings:
             if not fits(reading, cells):
                 p.needs_review(f"{direction}{number}: clue answer {reading} differs from grid {expanded}")
-            p.clues.append(Clue(direction, number, text_, reading))
+            p.clues.append(Clue(direction, number, text_, reading, hint))
+            hint = []  # once per clue, not per reading
     for (direction, number), rest in alts.items():
         p.needs_review(f"{direction}{number}: ^alt: {' '.join(rest)} for a clue that isn't there")
     if not p.clues:
         raise ConvertError("no clues")
+    for direction, number in hints:
+        p.tricky.append(f"{direction}{number}: ^hint: for a clue that isn't there, not carried")
     for key, n in sorted(extras.items()):
         p.tricky.append(f"{n} clues have a ^{key}: line, not carried")
 
@@ -217,6 +227,18 @@ CLUE = re.compile(r"^([AD])(\d+)\.\s*(.*?)\s*~\s*([^~]*)$")
 CLUE_META = re.compile(r"^([AD]\d+)\s+\^(\w+):")
 LINK = re.compile(r"\{@(.*?)@\}")  # Puzzmo: {@ text | url @}
 IMAGE = re.compile(r"\{!(.*?)!\}")  # Puzzmo: {! url | alt | size !}
+
+
+def text_of(raw: str) -> str:
+    """A clue's or hint's text: entities decoded, Puzzmo's markup in xd's form, its backticks
+    around titles as double quotes."""
+    return plain(xd_markup(html.unescape(raw))).replace("`", '"')
+
+
+def hint_meta(hints: dict[tuple[str, int], str], direction: str, number: int) -> list[tuple[str, str]]:
+    """The clue's hint as its metadata line, taken out of `hints` (what's left has no clue)."""
+    hint = hints.pop((direction, number), "")
+    return [("Hint", hint)] if hint else []
 
 
 def answer_of(raw: str, split: str) -> str:
