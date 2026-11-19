@@ -181,6 +181,8 @@ class Clue:
     number: int
     text: str
     answer: str
+    # metadata lines written under the clue, `A1 ^Hint: ...` (xd v4 clue metadata): (key, value)
+    meta: list[tuple[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -229,11 +231,18 @@ class Puzzle:
         out.append("")
         out.append("")
         prev = None
-        for c in sorted(self.clues, key=lambda c: (0 if c.direction == "A" else 1, c.number)):
+        clues = sorted(self.clues, key=lambda c: (0 if c.direction == "A" else 1, c.number))
+        for i, c in enumerate(clues):
             if prev and prev != c.direction:
                 out.append("")
             prev = c.direction
             out.append(f"{c.direction}{c.number}. {c.text or '[XXX]'} ~ {c.answer}")
+            # a clue written once per reading has its metadata lines once, under the last
+            pos = (c.direction, c.number)
+            if i + 1 == len(clues) or (clues[i + 1].direction, clues[i + 1].number) != pos:
+                for same in clues:
+                    if (same.direction, same.number) == pos:
+                        out.extend(f"{c.direction}{c.number} ^{k}: {v}" for k, v in same.meta)
         if self.notes.strip():
             out.append("")
             out.append("")
