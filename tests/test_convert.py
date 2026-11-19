@@ -198,7 +198,7 @@ def test_writer_layout():
     p.grid = ["AB", "C#"]
     p.clues = [xd.Clue("D", 1, "Down", "AC"), xd.Clue("A", 1, "", "AB")]
     p.set("Date", "2026-10-29")
-    p.set("Title", "  Some   title ")
+    p.set("Title", "  Some\n title ")  # a line break is layout; the ends are trimmed
     p.set("Author", "")  # empty headers are left out
     p.set("Xtra", "x")  # unknown headers go last
     assert (
@@ -243,3 +243,11 @@ def test_broken_ipuz():
 def test_broken_puz(puz_bytes):
     with pytest.raises(convert.ConvertError):
         convert.convert(puz_bytes[:60])
+
+
+def test_tidy_space_keeps_runs_of_spaces():
+    # Puzzmo's hint for pzmo2024-01-08 A29: the wider gaps are the word breaks
+    assert xd.plain("into R O C _   A _ D   R _ _ _") == "into R O C _   A _ D   R _ _ _"
+    assert xd.clue_text("<i>S</i>   L") == "{/S/}   L"
+    # tabs, line breaks and no-break spaces are layout
+    assert xd.tidy_space(" a\t b\r\nc\xa0\xa0d ") == "a b c  d"

@@ -59,6 +59,12 @@ def _marked(m: re.Match) -> str:
         return inner
     lead = inner[: len(inner) - len(inner.lstrip())]
     trail = inner[len(inner.rstrip()) :]
+    # a space moved out beside one already there would make a run the text didn't have
+    s = m.string
+    if lead and m.start() > 0 and s[m.start() - 1].isspace():
+        lead = ""
+    if trail and m.end() < len(s) and s[m.end()].isspace():
+        trail = ""
     return lead + MARKUP[m.group(1).lower()] % core + trail
 
 

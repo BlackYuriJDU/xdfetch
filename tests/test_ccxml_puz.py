@@ -66,7 +66,7 @@ def test_house_style_end_to_end_with_a_date_title():
     assert p.to_xd() == (
         "Title: October 9, 2026\n"
         "Author: Ann Setter\n"
-        "Copyright: © 2026 Arkadium\n"
+        "Copyright: © 2026  Arkadium\n"  # a run of spaces is kept as received (xdlint XD210)
         "Date: 2026-10-09\n"
         "Special: circle\n"
         "Rebus: 1=PS\n"
@@ -83,7 +83,7 @@ def test_house_style_end_to_end_with_a_date_title():
         "D3. Energy... ~ PSEP\n"
         "D4. Resort ~ SPA\n"
         "\n\n"
-        "A note... with spaces\n"
+        "A note...  with spaces\n"
     )
 
 
