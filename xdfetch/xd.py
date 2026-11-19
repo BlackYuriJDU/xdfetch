@@ -85,6 +85,7 @@ MARKUP = [
     (re.compile(r"<\s*br\s*/?\s*>", re.IGNORECASE), " "),
 ]
 TAG = re.compile(r"<[^>]+>")
+EMPTY_MARKUP = re.compile(r" *\{([/*_\-^~])\s*\1\} *")
 
 
 # Mojibake repair, ported from xd's xdfile/utils.py (clean_latin1_utf8_mojibake,
@@ -153,12 +154,21 @@ def repair(text: str) -> str:
     return clean_c1_controls(text)
 
 
+def tidy_space(text: str) -> str:
+    """A run holding a tab, line break or other non-space whitespace becomes one space
+    (layout in the source), a no-break space becomes a space, and a run of plain spaces
+    is kept as received: some are the puzzle (`R O C _   A _ D   R _ _ _`). Ends trimmed.
+    xd's puz2xd does the same (xdfile.utils.tidy_space); xdlint XD210 lists the runs."""
+    text = text.replace("\xa0", " ")
+    return re.sub(r"\s*[^\S ]\s*", " ", text).strip()
+
+
 def plain(text: str) -> str:
     """Header/notes text: entities decoded, mojibake repaired, typography flattened,
-    whitespace collapsed (house style; xdlint XD009, XD010, XD208)."""
+    whitespace tidied (house style; xdlint XD009, XD010, XD208, XD210)."""
     text = repair(html.unescape(text))
     text = unicodedata.normalize("NFC", text).translate(FLAT)
-    return re.sub(r"\s+", " ", text).strip()
+    return tidy_space(text)
 
 
 def clue_text(text: str, keep_markup: bool = True) -> str:
@@ -167,9 +177,9 @@ def clue_text(text: str, keep_markup: bool = True) -> str:
         text = pattern.sub(rep, text)
     text = TAG.sub("", text)  # any other tag is dropped, its text kept
     text = plain(text)
-    # markup around nothing but space is the space ('"Big"<i> </i>top')
-    text = re.sub(r"\{([/*_\-^~])(\s*)\1\}", lambda m: " " if m.group(2) else "", text)
-    text = re.sub(r"\s+", " ", text).strip()
+    # markup around nothing but space is the space ('"Big"<i> </i>top'), one space
+    # with any beside it, since those come from the markup, not the text
+    text = EMPTY_MARKUP.sub(lambda m: " " if any(c.isspace() for c in m.group(0)) else "", text).strip()
     # tidy spaces that markup conversion can leave inside the braces
     text = re.sub(r"\{([/*_\-^~])\s+", r"{\1", text)
     text = re.sub(r"\s+([/*_\-^~])\}", r"\1}", text)
